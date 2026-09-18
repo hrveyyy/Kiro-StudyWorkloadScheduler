@@ -73,10 +73,16 @@ export async function authSignIn(email, password) {
   return data;
 }
 
-/** Sign out the current user. */
+/** Sign out the current user. Uses 'local' scope so it clears this tab's
+ *  session immediately even if the Supabase request fails (e.g. offline). */
 export async function authSignOut() {
-  const { error } = await supabase.auth.signOut();
-  if (error) throw error;
+  // 'local' scope clears localStorage/cookies immediately without waiting
+  // for the server round-trip — fixes cases where the server call stalls
+  const { error } = await supabase.auth.signOut({ scope: 'local' });
+  if (error) {
+    // Even on error, force-clear the session client-side
+    console.warn('Sign-out server call failed, clearing session locally:', error.message);
+  }
 }
 
 /** Get the current session (persisted automatically by Supabase). */

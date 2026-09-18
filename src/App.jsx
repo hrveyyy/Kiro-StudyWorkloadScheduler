@@ -180,7 +180,15 @@ export default function App() {
   const handleSignOut = useCallback(async () => {
     setUserMenuOpen(false);
     clearTimeout(capSaveTimer.current);
-    await authSignOut();
+    try {
+      await authSignOut();
+    } catch (err) {
+      console.warn('Sign-out error:', err);
+    }
+    // Force-clear session locally regardless of server response
+    setSession(null);
+    setProfile(null);
+    setTasks([]);
   }, []);
 
   // ── Stats ─────────────────────────────────────────────────────────────────
