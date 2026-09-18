@@ -5,17 +5,40 @@ const SUPABASE_KEY = 'sb_publishable_222KsNK9AbAHNRfQOvo8AQ_-8aKQQzH';
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// ── Shape mapping ────────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════
+//  Shape mappers
+// ════════════════════════════════════════════════════════════
 
+/**
+ * Map a profiles row → app Profile object.
+ */
+function rowToProfile(row) {
+  return {
+    id:            row.id,
+    email:         row.email,
+    fullName:      row.full_name ?? '',
+    dailyHoursCap: Number(row.daily_hours_cap ?? 3),
+    createdAt:     row.created_at,
+  };
+}
+
+/**
+ * Map a tasks row → app Task object.
+ * The row may include a nested `profiles` object when fetched with a join.
+ */
 function rowToTask(row) {
   return {
     id:             row.id,
     name:           row.name,
-    deadline:       row.deadline,
+    deadline:       row.deadline,          // "YYYY-MM-DD"
     weight:         row.weight,
-    estimatedHours: row.estimated_hours,
+    estimatedHours: Number(row.estimated_hours),
     dependsOn:      row.depends_on ?? null,
     completed:      row.completed,
+    userId:         row.user_id ?? null,
+    // Joined profile info (present when fetched with select that includes profiles)
+    ownerEmail:     row.profiles?.email ?? null,
+    ownerName:      row.profiles?.full_name ?? null,
   };
 }
 
@@ -32,9 +55,11 @@ function taskToRow(task, userId) {
   };
 }
 
-// ── Auth helpers ─────────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════
+//  Auth helpers
+// ════════════════════════════════════════════════════════════
 
-/** Register a new user with email + password. */
+/** Register a new user. */
 export async function authSignUp(email, password) {
   const { data, error } = await supabase.auth.signUp({ email, password });
   if (error) throw error;
@@ -54,46 +79,98 @@ export async function authSignOut() {
   if (error) throw error;
 }
 
-/**
- * Get the current session. Returns { session, user } or null.
- * Supabase automatically persists + refreshes the session in localStorage.
- */
+/** Get the current session (persisted automatically by Supabase). */
 export async function authGetSession() {
   const { data, error } = await supabase.auth.getSession();
   if (error) throw error;
-  return data.session; // null if not logged in
+  return data.session ?? null;
 }
 
-/**
- * Subscribe to auth state changes.
- * Returns an unsubscribe function.
- */
+/** Subscribe to auth state changes. Returns unsubscribe fn. */
 export function authOnChange(callback) {
   const { data: { subscription } } = supabase.auth.onAuthStateChange(
-    (_event, session) => callback(session)
+    (_event, session) => callback(session ?? null)
   );
   return () => subscription.unsubscribe();
 }
 
-// ── Task CRUD (all scoped to authenticated user via RLS) ─────────────────────
+// ════════════════════════════════════════════════════════════
+//  Profile CRUD
+// ════════════════════════════════════════════════════════════
 
-/** Load all tasks for the current user. */
+/**
+ * Load the current user's profile row.
+ * The trigger we created auto-inserts a profile on signup,
+ * so this should always return a row for authenticated users.
+ */
+export async function dbLoadProfile() {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('*')
+    .single();
+
+  if (error) throw error;
+  return rowToProfile(data);
+}
+
+/**
+ * Update profile fields (full_name and/or daily_hours_cap).
+ * Only sends the fields you pass — partial update safe.
+ */
+export async function dbUpdateProfile(fields) {
+  // fields: { fullName?, dailyHoursCap? }
+  const row = {};
+  if (fields.fullName      !== undefined) row.full_name       = fields.fullName;
+  if (fields.dailyHoursCap !== undefined) row.daily_hours_cap = fields.dailyHoursCap;
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .update(row)
+    .eq('id', (await supabase.auth.getUser()).data.user.id)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return rowToProfile(data);
+}
+
+// ════════════════════════════════════════════════════════════
+//  Task CRUD  (RLS-scoped to the authenticated user)
+// ════════════════════════════════════════════════════════════
+
+/**
+ * Load all tasks for the current user.
+ * Joins profiles so each task carries ownerEmail / ownerName —
+ * makes the Supabase table view much more readable.
+ */
 export async function dbLoadTasks() {
   const { data, error } = await supabase
     .from('tasks')
-    .select('*')
+    .select(`
+      *,
+      profiles (
+        email,
+        full_name
+      )
+    `)
     .order('created_at', { ascending: true });
 
   if (error) throw error;
   return data.map(rowToTask);
 }
 
-/** Insert a new task. userId is attached so RLS insert policy is satisfied. */
+/** Insert a new task row. */
 export async function dbAddTask(task, userId) {
   const { data, error } = await supabase
     .from('tasks')
     .insert(taskToRow(task, userId))
-    .select()
+    .select(`
+      *,
+      profiles (
+        email,
+        full_name
+      )
+    `)
     .single();
 
   if (error) throw error;
@@ -106,7 +183,13 @@ export async function dbUpdateTask(task, userId) {
     .from('tasks')
     .update(taskToRow(task, userId))
     .eq('id', task.id)
-    .select()
+    .select(`
+      *,
+      profiles (
+        email,
+        full_name
+      )
+    `)
     .single();
 
   if (error) throw error;
@@ -119,7 +202,13 @@ export async function dbCompleteTask(taskId) {
     .from('tasks')
     .update({ completed: true })
     .eq('id', taskId)
-    .select()
+    .select(`
+      *,
+      profiles (
+        email,
+        full_name
+      )
+    `)
     .single();
 
   if (error) throw error;

@@ -3,6 +3,7 @@ import { runScheduler } from './scheduler.js';
 import { getSeedTasks } from './seedData.js';
 import {
   dbLoadTasks, dbAddTask, dbUpdateTask, dbCompleteTask, dbDeleteTask,
+  dbLoadProfile, dbUpdateProfile,
   authGetSession, authOnChange, authSignOut,
 } from './supabase.js';
 import AuthPage from './AuthPage.jsx';
@@ -10,59 +11,69 @@ import TaskFormModal from './TaskForm.jsx';
 import TaskTable from './TaskTable.jsx';
 import DailySchedule from './DailySchedule.jsx';
 
-const DEFAULT_CAP = 3;
-
 export default function App() {
-  // ── Auth state ────────────────────────────────────────────────────────────
-  const [session, setSession]         = useState(undefined); // undefined = still checking
+  // ── Auth / profile state ──────────────────────────────────────────────────
+  const [session, setSession]           = useState(undefined); // undefined = checking
+  const [profile, setProfile]           = useState(null);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   // ── Task state ────────────────────────────────────────────────────────────
-  const [tasks, setTasks]             = useState([]);
-  const [loading, setLoading]         = useState(false);
-  const [dbError, setDbError]         = useState(null);
-  const [dailyHoursCap, setDailyHoursCap] = useState(DEFAULT_CAP);
-  const [capInput, setCapInput]       = useState(String(DEFAULT_CAP));
+  const [tasks, setTasks]       = useState([]);
+  const [loading, setLoading]   = useState(false);
+  const [dbError, setDbError]   = useState(null);
+
+  // Daily cap — driven by profile.dailyHoursCap once loaded
+  const [dailyHoursCap, setDailyHoursCap] = useState(3);
+  const [capInput, setCapInput]           = useState('3');
+  const capSaveTimer = useRef(null); // debounce DB writes
+
   const [highlightedTaskIds, setHighlightedTaskIds] = useState(new Set());
   const prevScheduleRef = useRef(null);
 
   // ── Modal state ───────────────────────────────────────────────────────────
-  const [modalOpen, setModalOpen]     = useState(false);
-  const [editTask, setEditTask]       = useState(null);
-  const [isSaving, setIsSaving]       = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editTask, setEditTask]   = useState(null);
+  const [isSaving, setIsSaving]   = useState(false);
 
-  // ── Bootstrap: check existing session on mount ───────────────────────────
+  // ── Bootstrap session ─────────────────────────────────────────────────────
   useEffect(() => {
     authGetSession().then((s) => setSession(s ?? null));
-
-    // Subscribe to auth changes (login / logout / token refresh)
     const unsub = authOnChange((s) => setSession(s ?? null));
     return unsub;
   }, []);
 
-  // ── Load tasks whenever session changes ───────────────────────────────────
+  // ── Load profile + tasks whenever session changes ─────────────────────────
   useEffect(() => {
-    if (!session) {
-      setTasks([]);
-      return;
-    }
+    if (session === undefined) return;
+    if (!session) { setTasks([]); setProfile(null); return; }
 
     async function load() {
       setLoading(true);
       setDbError(null);
       try {
-        const data = await dbLoadTasks();
+        // Load profile and tasks in parallel
+        const [prof, data] = await Promise.all([dbLoadProfile(), dbLoadTasks()]);
+
+        setProfile(prof);
+        setDailyHoursCap(prof.dailyHoursCap);
+        setCapInput(String(prof.dailyHoursCap));
+
         if (data.length === 0) {
-          // Seed for first-time users
-          const seeds = getSeedTasks().map((t) => ({ ...t, id: `seed-${session.user.id.slice(0,8)}-${t.id}` }));
-          const inserted = await Promise.all(seeds.map((t) => dbAddTask(t, session.user.id)));
+          // First-time user — seed sample tasks
+          const seeds = getSeedTasks().map((t) => ({
+            ...t,
+            id: `seed-${session.user.id.slice(0, 8)}-${t.id}`,
+          }));
+          const inserted = await Promise.all(
+            seeds.map((t) => dbAddTask(t, session.user.id))
+          );
           setTasks(inserted);
         } else {
           setTasks(data);
         }
       } catch (err) {
-        console.error('Load tasks failed:', err);
-        setDbError(err.message ?? 'Could not load tasks.');
+        console.error('Load failed:', err);
+        setDbError(err.message ?? 'Could not load data.');
         setTasks(getSeedTasks());
       } finally {
         setLoading(false);
@@ -102,9 +113,9 @@ export default function App() {
   }, [scheduledTasks]);
 
   // ── Modal helpers ─────────────────────────────────────────────────────────
-  function openAddModal()  { setEditTask(null); setModalOpen(true); }
+  function openAddModal()      { setEditTask(null); setModalOpen(true); }
   function openEditModal(task) { setEditTask(task); setModalOpen(true); }
-  function closeModal()    { if (!isSaving) { setModalOpen(false); setEditTask(null); } }
+  function closeModal()        { if (!isSaving) { setModalOpen(false); setEditTask(null); } }
 
   // ── CRUD handlers ─────────────────────────────────────────────────────────
   const handleSave = useCallback(async (task) => {
@@ -144,17 +155,32 @@ export default function App() {
     }
   }, []);
 
+  // ── Daily cap — update locally immediately, debounce DB write ─────────────
   const handleCapInput = useCallback((e) => {
     const raw = e.target.value;
     setCapInput(raw);
     const val = parseFloat(raw);
-    if (!isNaN(val) && val > 0) setDailyHoursCap(val);
+    if (isNaN(val) || val <= 0) return;
+
+    setDailyHoursCap(val);
+
+    // Debounce: save to profiles table 800ms after user stops typing
+    clearTimeout(capSaveTimer.current);
+    capSaveTimer.current = setTimeout(async () => {
+      try {
+        const updated = await dbUpdateProfile({ dailyHoursCap: val });
+        setProfile(updated);
+      } catch (err) {
+        console.error('Failed to save daily cap:', err);
+      }
+    }, 800);
   }, []);
 
+  // ── Sign out ──────────────────────────────────────────────────────────────
   const handleSignOut = useCallback(async () => {
     setUserMenuOpen(false);
+    clearTimeout(capSaveTimer.current);
     await authSignOut();
-    // authOnChange listener will set session to null
   }, []);
 
   // ── Stats ─────────────────────────────────────────────────────────────────
@@ -166,7 +192,7 @@ export default function App() {
     return taskMap[t.dependsOn] && !taskMap[t.dependsOn].completed;
   }).length;
 
-  // ── Auth loading (session check in progress) ──────────────────────────────
+  // ── Session loading ───────────────────────────────────────────────────────
   if (session === undefined) {
     return (
       <div className="loading-state" style={{ minHeight: '100vh' }}>
@@ -181,12 +207,15 @@ export default function App() {
     return <AuthPage onAuth={setSession} />;
   }
 
-  // ── Main app ──────────────────────────────────────────────────────────────
-  const userEmail = session.user?.email ?? 'User';
-  const userInitial = userEmail[0].toUpperCase();
+  // ── Resolved display info ─────────────────────────────────────────────────
+  const displayName    = profile?.fullName || profile?.email || session.user?.email || 'User';
+  const userInitial    = displayName[0].toUpperCase();
+  const userEmail      = profile?.email || session.user?.email || '';
 
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="app">
+
       {/* ── Header ── */}
       <header className="app-header">
         <div className="header-inner">
@@ -203,6 +232,7 @@ export default function App() {
               ➕ Add Task
             </button>
 
+            {/* Daily cap — persisted to profiles table */}
             <div className="cap-control">
               <label htmlFor="daily-cap">Daily Study Hours</label>
               <div className="cap-input-wrap">
@@ -229,8 +259,10 @@ export default function App() {
               >
                 <span className="user-avatar">{userInitial}</span>
               </button>
+
               {userMenuOpen && (
                 <div className="user-dropdown" role="menu">
+                  <div className="user-dropdown-name">{displayName}</div>
                   <div className="user-dropdown-email">{userEmail}</div>
                   <hr className="user-dropdown-divider" />
                   <button
@@ -255,6 +287,7 @@ export default function App() {
         </div>
       </header>
 
+      {/* ── Main ── */}
       <main className="app-main">
         {dbError && (
           <div className="db-error-banner" role="alert">
@@ -315,7 +348,6 @@ export default function App() {
         isSaving={isSaving}
       />
 
-      {/* Close user menu on outside click */}
       {userMenuOpen && (
         <div className="user-menu-backdrop" onClick={() => setUserMenuOpen(false)} />
       )}
