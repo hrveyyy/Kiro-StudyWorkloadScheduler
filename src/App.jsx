@@ -224,6 +224,11 @@ export default function App() {
   return (
     <div className="app">
 
+      {/* Backdrop rendered first so it's below the header in paint order */}
+      {userMenuOpen && (
+        <div className="user-menu-backdrop" onClick={() => setUserMenuOpen(false)} />
+      )}
+
       {/* ── Header ── */}
       <header className="app-header">
         <div className="header-inner">
@@ -269,13 +274,18 @@ export default function App() {
               </button>
 
               {userMenuOpen && (
-                <div className="user-dropdown" role="menu">
+                <div
+                  className="user-dropdown"
+                  role="menu"
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <div className="user-dropdown-name">{displayName}</div>
                   <div className="user-dropdown-email">{userEmail}</div>
                   <hr className="user-dropdown-divider" />
                   <button
                     className="user-dropdown-item user-dropdown-signout"
                     role="menuitem"
+                    onMouseDown={(e) => e.preventDefault()}
                     onClick={handleSignOut}
                   >
                     🚪 Sign Out
@@ -373,9 +383,6 @@ export default function App() {
         isSaving={isSaving}
       />
 
-      {userMenuOpen && (
-        <div className="user-menu-backdrop" onClick={() => setUserMenuOpen(false)} />
-      )}
     </div>
   );
 }
