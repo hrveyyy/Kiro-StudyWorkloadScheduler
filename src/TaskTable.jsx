@@ -1,14 +1,16 @@
 /**
- * TaskTable — shows all tasks with status, overload warning, mark-complete button.
+ * TaskTable — shows all tasks with status, overload warning,
+ * Edit button, and Mark Complete button.
  *
  * Props:
  *   tasks          : Task[]
- *   scheduledTasks : ScheduledTask[]   — output from runScheduler
+ *   scheduledTasks : ScheduledTask[]
  *   taskMap        : { [id]: Task }
  *   onComplete     : (taskId) => void
+ *   onEdit         : (task) => void
+ *   onDelete       : (taskId) => void
  */
-export default function TaskTable({ tasks, scheduledTasks, taskMap, onComplete }) {
-  // Build lookup: taskId -> scheduledTask info
+export default function TaskTable({ tasks, scheduledTasks, taskMap, onComplete, onEdit, onDelete }) {
   const schedMap = Object.fromEntries(
     scheduledTasks.map((st) => [st.taskId, st])
   );
@@ -36,23 +38,21 @@ export default function TaskTable({ tasks, scheduledTasks, taskMap, onComplete }
   const completed  = tasks.filter((t) => t.completed);
 
   function renderRow(task) {
-    const blocked = isBlocked(task);
-    const st = schedMap[task.id];
+    const blocked  = isBlocked(task);
+    const st       = schedMap[task.id];
     const overloaded = st?.isOverloaded ?? false;
-    const depName = task.dependsOn ? taskMap[task.dependsOn]?.name : null;
+    const depName  = task.dependsOn ? taskMap[task.dependsOn]?.name : null;
 
     return (
       <tr
         key={task.id}
         className={[
-          task.completed ? 'row-completed' : '',
-          overloaded ? 'row-overloaded' : '',
-          blocked ? 'row-blocked' : '',
-        ]
-          .filter(Boolean)
-          .join(' ')}
+          task.completed  ? 'row-completed'  : '',
+          overloaded      ? 'row-overloaded' : '',
+          blocked         ? 'row-blocked'    : '',
+        ].filter(Boolean).join(' ')}
       >
-        {/* Name + overload badge */}
+        {/* Name */}
         <td className="td-name">
           <span className={task.completed ? 'task-name-done' : 'task-name'}>
             {task.name}
@@ -67,9 +67,7 @@ export default function TaskTable({ tasks, scheduledTasks, taskMap, onComplete }
         {/* Deadline */}
         <td className="td-deadline">
           {new Date(task.deadline + 'T00:00:00').toLocaleDateString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric',
+            month: 'short', day: 'numeric', year: 'numeric',
           })}
         </td>
 
@@ -83,7 +81,7 @@ export default function TaskTable({ tasks, scheduledTasks, taskMap, onComplete }
         {/* Hours */}
         <td className="td-hours">{task.estimatedHours}h</td>
 
-        {/* Dependency status */}
+        {/* Dependency */}
         <td className="td-dep">
           {blocked ? (
             <span className="badge badge-blocked">🔒 Blocked by {depName}</span>
@@ -94,7 +92,7 @@ export default function TaskTable({ tasks, scheduledTasks, taskMap, onComplete }
           )}
         </td>
 
-        {/* Overload warning cell */}
+        {/* Status */}
         <td className="td-status">
           {task.completed ? (
             <span className="badge badge-done">✓ Complete</span>
@@ -109,15 +107,35 @@ export default function TaskTable({ tasks, scheduledTasks, taskMap, onComplete }
 
         {/* Actions */}
         <td className="td-action">
-          {!task.completed && (
+          <div className="action-group">
+            {!task.completed && (
+              <>
+                <button
+                  className="btn btn-edit"
+                  onClick={() => onEdit(task)}
+                  aria-label={`Edit "${task.name}"`}
+                >
+                  ✏️ Edit
+                </button>
+                <button
+                  className="btn btn-complete"
+                  onClick={() => onComplete(task.id)}
+                  aria-label={`Mark "${task.name}" as complete`}
+                >
+                  ✓ Done
+                </button>
+              </>
+            )}
             <button
-              className="btn btn-complete"
-              onClick={() => onComplete(task.id)}
-              aria-label={`Mark "${task.name}" as complete`}
+              className="btn btn-delete"
+              onClick={() => {
+                if (window.confirm(`Delete "${task.name}"?`)) onDelete(task.id);
+              }}
+              aria-label={`Delete "${task.name}"`}
             >
-              Mark Complete
+              🗑
             </button>
-          )}
+          </div>
         </td>
       </tr>
     );
@@ -127,7 +145,7 @@ export default function TaskTable({ tasks, scheduledTasks, taskMap, onComplete }
     <div className="task-table-wrap">
       <h2 className="section-title">📋 All Tasks</h2>
       {tasks.length === 0 ? (
-        <p className="empty-msg">No tasks yet. Add one above!</p>
+        <p className="empty-msg">No tasks yet. Click "Add Task" to get started!</p>
       ) : (
         <div className="table-scroll">
           <table className="task-table">
@@ -139,7 +157,7 @@ export default function TaskTable({ tasks, scheduledTasks, taskMap, onComplete }
                 <th>Hours</th>
                 <th>Dependency</th>
                 <th>Status</th>
-                <th>Action</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>

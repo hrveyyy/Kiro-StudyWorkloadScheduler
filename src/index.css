@@ -556,3 +556,204 @@ html, body, #root {
   border-top: 1px solid var(--color-border);
   background: var(--color-surface);
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   Modal
+   ═══════════════════════════════════════════════════════════════ */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+  animation: fadeIn 120ms ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.modal {
+  background: var(--color-surface);
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.25);
+  width: 100%;
+  max-width: 520px;
+  animation: slideUp 180ms ease;
+  overflow: hidden;
+}
+
+@keyframes slideUp {
+  from { transform: translateY(24px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.modal-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 1rem;
+  color: var(--color-muted);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  line-height: 1;
+  transition: background var(--transition), color var(--transition);
+}
+.modal-close:hover { background: #f1f5f9; color: var(--color-text); }
+
+.modal-body {
+  padding: 20px 22px;
+}
+
+.modal-body .form-grid {
+  grid-template-columns: 1fr 1fr;
+  margin-bottom: 0;
+}
+
+.form-field-full {
+  grid-column: 1 / -1;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 22px 18px;
+  border-top: 1px solid var(--color-border);
+  background: #f8fafc;
+}
+
+/* ── Add Task button in header ── */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.btn-add-task {
+  background: #fff;
+  color: var(--color-primary);
+  border: 2px solid rgba(255,255,255,.6);
+  font-size: .9rem;
+  font-weight: 700;
+  padding: 9px 18px;
+  border-radius: var(--radius);
+  box-shadow: 0 2px 8px rgba(0,0,0,.12);
+  white-space: nowrap;
+}
+.btn-add-task:hover {
+  background: #eef2ff;
+  border-color: #fff;
+  box-shadow: 0 4px 14px rgba(0,0,0,.15);
+}
+.btn-add-task:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ── Edit button ── */
+.btn-edit {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1.5px solid #bfdbfe;
+  padding: 5px 10px;
+  font-size: .78rem;
+  border-radius: var(--radius-sm);
+}
+.btn-edit:hover { background: #dbeafe; border-color: #93c5fd; }
+
+/* ── Delete button ── */
+.btn-delete {
+  background: #fef2f2;
+  color: var(--color-red);
+  border: 1.5px solid #fecaca;
+  padding: 5px 8px;
+  font-size: .78rem;
+  border-radius: var(--radius-sm);
+}
+.btn-delete:hover { background: #fee2e2; border-color: #f87171; }
+
+/* Cancel button */
+.btn-cancel {
+  background: #f1f5f9;
+  color: var(--color-muted);
+  border: 1.5px solid var(--color-border);
+  padding: 8px 16px;
+  font-size: .88rem;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+}
+.btn-cancel:hover { background: #e2e8f0; color: var(--color-text); }
+
+/* Action group in table */
+.action-group {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* ── Loading state ── */
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 80px 0;
+  color: var(--color-muted);
+}
+
+.spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 700ms linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── DB error banner ── */
+.db-error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: #fef2f2;
+  border: 1.5px solid #fecaca;
+  border-radius: var(--radius);
+  padding: 10px 16px;
+  margin-bottom: 16px;
+  font-size: .88rem;
+  color: #7f1d1d;
+}
+.db-error-banner button {
+  background: none;
+  border: none;
+  font-size: 1rem;
+  cursor: pointer;
+  color: #7f1d1d;
+  flex-shrink: 0;
+}
