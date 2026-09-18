@@ -5,14 +5,13 @@ const SUPABASE_KEY = 'sb_publishable_222KsNK9AbAHNRfQOvo8AQ_-8aKQQzH';
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// ── Row <-> Task shape mapping ───────────────────────────────────────────────
-// DB columns use snake_case; the app uses camelCase.
+// ── Shape mapping ────────────────────────────────────────────────────────────
 
 function rowToTask(row) {
   return {
     id:             row.id,
     name:           row.name,
-    deadline:       row.deadline,          // stored as "YYYY-MM-DD"
+    deadline:       row.deadline,
     weight:         row.weight,
     estimatedHours: row.estimated_hours,
     dependsOn:      row.depends_on ?? null,
@@ -20,7 +19,7 @@ function rowToTask(row) {
   };
 }
 
-function taskToRow(task) {
+function taskToRow(task, userId) {
   return {
     id:              task.id,
     name:            task.name,
@@ -29,12 +28,56 @@ function taskToRow(task) {
     estimated_hours: task.estimatedHours,
     depends_on:      task.dependsOn ?? null,
     completed:       task.completed,
+    user_id:         userId,
   };
 }
 
-// ── CRUD helpers ─────────────────────────────────────────────────────────────
+// ── Auth helpers ─────────────────────────────────────────────────────────────
 
-/** Load all tasks ordered by creation time. */
+/** Register a new user with email + password. */
+export async function authSignUp(email, password) {
+  const { data, error } = await supabase.auth.signUp({ email, password });
+  if (error) throw error;
+  return data;
+}
+
+/** Sign in an existing user. */
+export async function authSignIn(email, password) {
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) throw error;
+  return data;
+}
+
+/** Sign out the current user. */
+export async function authSignOut() {
+  const { error } = await supabase.auth.signOut();
+  if (error) throw error;
+}
+
+/**
+ * Get the current session. Returns { session, user } or null.
+ * Supabase automatically persists + refreshes the session in localStorage.
+ */
+export async function authGetSession() {
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw error;
+  return data.session; // null if not logged in
+}
+
+/**
+ * Subscribe to auth state changes.
+ * Returns an unsubscribe function.
+ */
+export function authOnChange(callback) {
+  const { data: { subscription } } = supabase.auth.onAuthStateChange(
+    (_event, session) => callback(session)
+  );
+  return () => subscription.unsubscribe();
+}
+
+// ── Task CRUD (all scoped to authenticated user via RLS) ─────────────────────
+
+/** Load all tasks for the current user. */
 export async function dbLoadTasks() {
   const { data, error } = await supabase
     .from('tasks')
@@ -45,11 +88,11 @@ export async function dbLoadTasks() {
   return data.map(rowToTask);
 }
 
-/** Insert a new task row. */
-export async function dbAddTask(task) {
+/** Insert a new task. userId is attached so RLS insert policy is satisfied. */
+export async function dbAddTask(task, userId) {
   const { data, error } = await supabase
     .from('tasks')
-    .insert(taskToRow(task))
+    .insert(taskToRow(task, userId))
     .select()
     .single();
 
@@ -57,11 +100,11 @@ export async function dbAddTask(task) {
   return rowToTask(data);
 }
 
-/** Update an existing task (any fields). */
-export async function dbUpdateTask(task) {
+/** Update an existing task. */
+export async function dbUpdateTask(task, userId) {
   const { data, error } = await supabase
     .from('tasks')
-    .update(taskToRow(task))
+    .update(taskToRow(task, userId))
     .eq('id', task.id)
     .select()
     .single();
@@ -83,7 +126,7 @@ export async function dbCompleteTask(taskId) {
   return rowToTask(data);
 }
 
-/** Delete a task by id. */
+/** Delete a task. */
 export async function dbDeleteTask(taskId) {
   const { error } = await supabase
     .from('tasks')

@@ -1,7 +1,11 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { runScheduler } from './scheduler.js';
 import { getSeedTasks } from './seedData.js';
-import { dbLoadTasks, dbAddTask, dbUpdateTask, dbCompleteTask, dbDeleteTask } from './supabase.js';
+import {
+  dbLoadTasks, dbAddTask, dbUpdateTask, dbCompleteTask, dbDeleteTask,
+  authGetSession, authOnChange, authSignOut,
+} from './supabase.js';
+import AuthPage from './AuthPage.jsx';
 import TaskFormModal from './TaskForm.jsx';
 import TaskTable from './TaskTable.jsx';
 import DailySchedule from './DailySchedule.jsx';
@@ -9,43 +13,63 @@ import DailySchedule from './DailySchedule.jsx';
 const DEFAULT_CAP = 3;
 
 export default function App() {
-  const [tasks, setTasks]               = useState([]);
-  const [loading, setLoading]           = useState(true);
-  const [dbError, setDbError]           = useState(null);
+  // ── Auth state ────────────────────────────────────────────────────────────
+  const [session, setSession]         = useState(undefined); // undefined = still checking
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+
+  // ── Task state ────────────────────────────────────────────────────────────
+  const [tasks, setTasks]             = useState([]);
+  const [loading, setLoading]         = useState(false);
+  const [dbError, setDbError]         = useState(null);
   const [dailyHoursCap, setDailyHoursCap] = useState(DEFAULT_CAP);
-  const [capInput, setCapInput]         = useState(String(DEFAULT_CAP));
+  const [capInput, setCapInput]       = useState(String(DEFAULT_CAP));
   const [highlightedTaskIds, setHighlightedTaskIds] = useState(new Set());
   const prevScheduleRef = useRef(null);
 
   // ── Modal state ───────────────────────────────────────────────────────────
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editTask, setEditTask]   = useState(null);   // null = Add, Task = Edit
-  const [isSaving, setIsSaving]   = useState(false);
+  const [modalOpen, setModalOpen]     = useState(false);
+  const [editTask, setEditTask]       = useState(null);
+  const [isSaving, setIsSaving]       = useState(false);
 
-  // ── Load tasks from Supabase on mount ────────────────────────────────────
+  // ── Bootstrap: check existing session on mount ───────────────────────────
   useEffect(() => {
+    authGetSession().then((s) => setSession(s ?? null));
+
+    // Subscribe to auth changes (login / logout / token refresh)
+    const unsub = authOnChange((s) => setSession(s ?? null));
+    return unsub;
+  }, []);
+
+  // ── Load tasks whenever session changes ───────────────────────────────────
+  useEffect(() => {
+    if (!session) {
+      setTasks([]);
+      return;
+    }
+
     async function load() {
+      setLoading(true);
+      setDbError(null);
       try {
         const data = await dbLoadTasks();
-        // If DB is empty, seed it with sample tasks
         if (data.length === 0) {
-          const seeds = getSeedTasks();
-          const inserted = await Promise.all(seeds.map(dbAddTask));
+          // Seed for first-time users
+          const seeds = getSeedTasks().map((t) => ({ ...t, id: `seed-${session.user.id.slice(0,8)}-${t.id}` }));
+          const inserted = await Promise.all(seeds.map((t) => dbAddTask(t, session.user.id)));
           setTasks(inserted);
         } else {
           setTasks(data);
         }
       } catch (err) {
-        console.error('Failed to load tasks:', err);
-        setDbError(err.message ?? 'Could not connect to database.');
-        // Fall back to seed data in-memory so app still works
+        console.error('Load tasks failed:', err);
+        setDbError(err.message ?? 'Could not load tasks.');
         setTasks(getSeedTasks());
       } finally {
         setLoading(false);
       }
     }
     load();
-  }, []);
+  }, [session]);
 
   // ── Scheduler ─────────────────────────────────────────────────────────────
   const { scheduledTasks, dailySchedule } = useMemo(
@@ -58,11 +82,10 @@ export default function App() {
     [tasks]
   );
 
-  // ── Highlight logic ───────────────────────────────────────────────────────
+  // ── Highlight reshuffled entries ──────────────────────────────────────────
   useMemo(() => {
     const prev = prevScheduleRef.current;
     if (!prev) { prevScheduleRef.current = scheduledTasks; return; }
-
     const prevMap = Object.fromEntries(prev.map((st) => [st.taskId, st]));
     const changed = new Set();
     for (const st of scheduledTasks) {
@@ -79,51 +102,35 @@ export default function App() {
   }, [scheduledTasks]);
 
   // ── Modal helpers ─────────────────────────────────────────────────────────
-  function openAddModal() {
-    setEditTask(null);
-    setModalOpen(true);
-  }
+  function openAddModal()  { setEditTask(null); setModalOpen(true); }
+  function openEditModal(task) { setEditTask(task); setModalOpen(true); }
+  function closeModal()    { if (!isSaving) { setModalOpen(false); setEditTask(null); } }
 
-  function openEditModal(task) {
-    setEditTask(task);
-    setModalOpen(true);
-  }
-
-  function closeModal() {
-    if (isSaving) return;
-    setModalOpen(false);
-    setEditTask(null);
-  }
-
-  // ── Handlers ──────────────────────────────────────────────────────────────
+  // ── CRUD handlers ─────────────────────────────────────────────────────────
   const handleSave = useCallback(async (task) => {
     setIsSaving(true);
     try {
       if (editTask) {
-        // Edit mode
-        const updated = await dbUpdateTask(task);
+        const updated = await dbUpdateTask(task, session.user.id);
         setTasks((prev) => prev.map((t) => t.id === updated.id ? updated : t));
       } else {
-        // Add mode
-        const added = await dbAddTask(task);
+        const added = await dbAddTask(task, session.user.id);
         setTasks((prev) => [...prev, added]);
       }
-      setModalOpen(false);
-      setEditTask(null);
+      closeModal();
     } catch (err) {
       console.error('Save failed:', err);
       alert(`Failed to save task: ${err.message}`);
     } finally {
       setIsSaving(false);
     }
-  }, [editTask]);
+  }, [editTask, session]);
 
   const handleMarkComplete = useCallback(async (taskId) => {
     try {
       const updated = await dbCompleteTask(taskId);
       setTasks((prev) => prev.map((t) => t.id === updated.id ? updated : t));
     } catch (err) {
-      console.error('Complete failed:', err);
       alert(`Failed to update task: ${err.message}`);
     }
   }, []);
@@ -133,7 +140,6 @@ export default function App() {
       await dbDeleteTask(taskId);
       setTasks((prev) => prev.filter((t) => t.id !== taskId));
     } catch (err) {
-      console.error('Delete failed:', err);
       alert(`Failed to delete task: ${err.message}`);
     }
   }, []);
@@ -145,6 +151,12 @@ export default function App() {
     if (!isNaN(val) && val > 0) setDailyHoursCap(val);
   }, []);
 
+  const handleSignOut = useCallback(async () => {
+    setUserMenuOpen(false);
+    await authSignOut();
+    // authOnChange listener will set session to null
+  }, []);
+
   // ── Stats ─────────────────────────────────────────────────────────────────
   const totalTasks      = tasks.length;
   const completedCount  = tasks.filter((t) => t.completed).length;
@@ -154,7 +166,25 @@ export default function App() {
     return taskMap[t.dependsOn] && !taskMap[t.dependsOn].completed;
   }).length;
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  // ── Auth loading (session check in progress) ──────────────────────────────
+  if (session === undefined) {
+    return (
+      <div className="loading-state" style={{ minHeight: '100vh' }}>
+        <div className="spinner" />
+        <p>Loading…</p>
+      </div>
+    );
+  }
+
+  // ── Auth gate ─────────────────────────────────────────────────────────────
+  if (!session) {
+    return <AuthPage onAuth={setSession} />;
+  }
+
+  // ── Main app ──────────────────────────────────────────────────────────────
+  const userEmail = session.user?.email ?? 'User';
+  const userInitial = userEmail[0].toUpperCase();
+
   return (
     <div className="app">
       {/* ── Header ── */}
@@ -169,12 +199,10 @@ export default function App() {
           </div>
 
           <div className="header-actions">
-            {/* Add Task button */}
             <button className="btn btn-add-task" onClick={openAddModal} disabled={loading}>
               ➕ Add Task
             </button>
 
-            {/* Daily Cap */}
             <div className="cap-control">
               <label htmlFor="daily-cap">Daily Study Hours</label>
               <div className="cap-input-wrap">
@@ -186,25 +214,48 @@ export default function App() {
                   value={capInput}
                   onChange={handleCapInput}
                   className="cap-input"
-                  aria-label="Daily hours cap"
                 />
                 <span className="cap-unit">hrs / day</span>
               </div>
+            </div>
+
+            {/* User menu */}
+            <div className="user-menu-wrap">
+              <button
+                className="user-avatar-btn"
+                onClick={() => setUserMenuOpen((o) => !o)}
+                aria-label="User menu"
+                aria-expanded={userMenuOpen}
+              >
+                <span className="user-avatar">{userInitial}</span>
+              </button>
+              {userMenuOpen && (
+                <div className="user-dropdown" role="menu">
+                  <div className="user-dropdown-email">{userEmail}</div>
+                  <hr className="user-dropdown-divider" />
+                  <button
+                    className="user-dropdown-item user-dropdown-signout"
+                    role="menuitem"
+                    onClick={handleSignOut}
+                  >
+                    🚪 Sign Out
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
 
         {/* Stats bar */}
         <div className="stats-bar">
-          <StatPill icon="📝" label="Total"     value={totalTasks} />
-          <StatPill icon="✅" label="Done"      value={completedCount}  color="green" />
-          <StatPill icon="🔒" label="Blocked"   value={blockedCount}    color={blockedCount > 0 ? 'amber' : undefined} />
+          <StatPill icon="📝" label="Total"      value={totalTasks} />
+          <StatPill icon="✅" label="Done"       value={completedCount}  color="green" />
+          <StatPill icon="🔒" label="Blocked"    value={blockedCount}    color={blockedCount > 0 ? 'amber' : undefined} />
           <StatPill icon="⚠️" label="Overloaded" value={overloadedCount} color={overloadedCount > 0 ? 'red' : undefined} />
         </div>
       </header>
 
       <main className="app-main">
-        {/* DB error banner */}
         {dbError && (
           <div className="db-error-banner" role="alert">
             <span>⚠️ Database error: {dbError} — showing local data only.</span>
@@ -212,15 +263,13 @@ export default function App() {
           </div>
         )}
 
-        {/* Loading state */}
         {loading ? (
           <div className="loading-state">
             <div className="spinner" />
-            <p>Loading tasks from database…</p>
+            <p>Loading your tasks…</p>
           </div>
         ) : (
           <>
-            {/* Overload banner */}
             {overloadedCount > 0 && (
               <div className="overload-banner" role="alert">
                 <span className="banner-icon">⚠️</span>
@@ -231,7 +280,6 @@ export default function App() {
               </div>
             )}
 
-            {/* Two-column layout */}
             <div className="layout">
               <div className="col-left">
                 <TaskTable
@@ -258,7 +306,6 @@ export default function App() {
         <p>Study Workload Scheduler · Powered by Supabase</p>
       </footer>
 
-      {/* ── Modal ── */}
       <TaskFormModal
         isOpen={modalOpen}
         editTask={editTask}
@@ -267,6 +314,11 @@ export default function App() {
         onClose={closeModal}
         isSaving={isSaving}
       />
+
+      {/* Close user menu on outside click */}
+      {userMenuOpen && (
+        <div className="user-menu-backdrop" onClick={() => setUserMenuOpen(false)} />
+      )}
     </div>
   );
 }
