@@ -232,7 +232,7 @@ export default function App() {
               ➕ Add Task
             </button>
 
-            {/* Daily cap — persisted to profiles table */}
+            {/* Daily cap — hidden on xs, shown sm+ via CSS */}
             <div className="cap-control">
               <label htmlFor="daily-cap">Daily Study Hours</label>
               <div className="cap-input-wrap">
@@ -275,6 +275,23 @@ export default function App() {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+
+        {/* Mobile-only cap row — visible only on xs where cap-control is hidden */}
+        <div className="mobile-cap-row">
+          <span className="mobile-cap-label">Daily Study Hours</span>
+          <div className="mobile-cap-inner">
+            <input
+              type="number"
+              min="0.5"
+              step="0.5"
+              value={capInput}
+              onChange={handleCapInput}
+              className="cap-input"
+              aria-label="Daily hours cap"
+            />
+            <span className="cap-unit">hrs / day</span>
           </div>
         </div>
 
