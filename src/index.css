@@ -343,7 +343,7 @@ img, svg { display: block; max-width: 100%; }
 .user-dropdown-item:hover { background: #f8fafc; }
 .user-dropdown-signout { color: var(--color-red); font-weight: 600; }
 
-.user-menu-backdrop { position: fixed; inset: 0; z-index: 599; }
+.user-menu-backdrop { position: fixed; inset: 0; z-index: 150; }
 
 /* Mobile cap row — shown only on xs below header */
 .mobile-cap-row {
