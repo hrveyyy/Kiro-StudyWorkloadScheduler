@@ -58,19 +58,7 @@ export default function App() {
         setDailyHoursCap(prof.dailyHoursCap);
         setCapInput(String(prof.dailyHoursCap));
 
-        if (data.length === 0) {
-          // First-time user — seed sample tasks
-          const seeds = getSeedTasks().map((t) => ({
-            ...t,
-            id: `seed-${session.user.id.slice(0, 8)}-${t.id}`,
-          }));
-          const inserted = await Promise.all(
-            seeds.map((t) => dbAddTask(t, session.user.id))
-          );
-          setTasks(inserted);
-        } else {
-          setTasks(data);
-        }
+        setTasks(data);
       } catch (err) {
         console.error('Load failed:', err);
         setDbError(err.message ?? 'Could not load data.');
